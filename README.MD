@@ -25,4 +25,5 @@
 3. Once you have made your change type: `git add .`
 4. Type: `git commit -m "DESCRIBE THE CHANGE YOU MADE HERE"` (not in capse lock)
 5. Type: `git push origin feature/YOUR_BRANCH_NAME` branch name you need to use from the second step
-6. Type: `git checkout origin main`
+6. In response from git you will get smth like: "Create Pull Request: https://XXXX". Open this link in browser and go through the process to first create and then merge Pull Request. Don't forget to delete the branch.
+7. Type: `git checkout origin main`
