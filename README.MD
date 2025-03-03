@@ -17,7 +17,7 @@
 ### Create your own feature branch
 
 0. You should be in Terminal, once you done step from Opening project chapter
-1. Type: `git checkout origin main` and after that type: `git pull origin main`
+1. Type: `git checkout main` and after that type: `git pull origin main`
 2. Type: `git checkout -b feature/YOUR_BRANCH_NAME` (not in caps lock)
 
 -   Do your programming here
