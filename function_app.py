@@ -18,7 +18,6 @@ app = func.FunctionApp()
 
 @app.timer_trigger(schedule="0 0 0 29 2 *", arg_name="myTimer", run_on_startup=True, use_monitor=False)
 def timer_trigger(myTimer: func.TimerRequest) -> None:
-    if myTimer.past_due:
-        fetch(CLIENT_ID, CLIENT_SECRET, TOKEN_URL, USERS_COURSES_URL)
+    fetch(CLIENT_ID, CLIENT_SECRET, TOKEN_URL, USERS_COURSES_URL)
 
     logging.info('Python timer trigger function executed.')
