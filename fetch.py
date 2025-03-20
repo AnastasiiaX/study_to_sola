@@ -5,6 +5,7 @@
 # Stores the last successful fetch timestamp in last_checked_timestamp.txt to prevent duplicate processing.
 
 import requests
+import logging
 import re
 import math
 import pandas as pd
@@ -25,7 +26,7 @@ def get_access_token(client_id, client_secret, token_url):
         response.raise_for_status()
         return response.json().get("access_token")
     except requests.exceptions.RequestException as err:
-        print(f"ERROR: Access token retrieval failed - {err}")
+        logging.error(f"ERROR: Access token retrieval failed - {err}")
         return None
 
 
@@ -61,7 +62,7 @@ def format_date(date_str):
         parsed_date = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
         return parsed_date.strftime("%Y-%m-%d")
     except ValueError:
-        print(f"WARNING: Date conversion failed ({date_str})")
+        logging.warning(f"WARNING: Date conversion failed ({date_str})")
         return None
 
 
@@ -77,7 +78,7 @@ def calculate_time_spent(start_date, finish_date):
         time_spent_seconds = (finish_dt - start_dt).total_seconds()
         return time_spent_seconds
     except ValueError:
-        print(
+        logging.warning(
             f"WARNING: Time calculation failed for start: {start_date}, finish: {finish_date}")
         return 0
 
@@ -94,7 +95,7 @@ def fetch(client_id, client_secret, token_url, users_courses_url):
     """Fetch completed trainings from Studytube and convert them into Solaforce format."""
     access_token = get_access_token(client_id, client_secret, token_url)
     if not access_token:
-        print("ERROR: Access token missing.")
+        logging.error("ERROR: Access token missing.")
         return
 
     # Fetch last timestamp to get only new updates
@@ -117,7 +118,7 @@ def fetch(client_id, client_secret, token_url, users_courses_url):
         all_courses = response.json()
 
         if not all_courses:
-            print("No new completed trainings retrieved from API.")
+            logging.info("No new completed trainings retrieved from API.")
             return
 
         completed_trainings = []
@@ -148,7 +149,7 @@ def fetch(client_id, client_secret, token_url, users_courses_url):
                 completed_trainings.append(training_data)
 
         if not completed_trainings:
-            print("No new completed trainings found.")
+            logging.info("No new completed trainings found.")
             return
 
         # Convert to DataFrame
@@ -163,11 +164,11 @@ def fetch(client_id, client_secret, token_url, users_courses_url):
         excel_filename = "completed_trainings.xlsx"
         df_completed_trainings.to_excel(excel_filename, index=False)
 
-        print(
+        logging.info(
             f"Completed trainings data saved to:\n - {csv_filename}\n - {excel_filename}")
 
         # Update last checked timestamp to avoid duplicate fetches
         update_last_checked_time()
 
     except requests.exceptions.RequestException as err:
-        print(f"ERROR: Failed to fetch course data - {err}")
+        logging.error(f"ERROR: Failed to fetch course data - {err}")
