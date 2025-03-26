@@ -13,6 +13,18 @@ from datetime import datetime, timezone
 
 LAST_CHECKED_FILE = "last_checked_timestamp.txt"
 
+# Default values
+DEFAULT_PROVIDER = "Halton Academy (ST)"
+DEFAULT_CATEGORY = "INTERNAL"
+
+# Training types with their API endpoints, data wrapper, and training type label
+TRAINING_TYPES = [
+    ("users/courses", "course", "Online Course"),
+    ("users/blog-articles", "blog_article", "Blog"),
+    ("users/videos", "video", "Video"),
+    ("users/documents", "document", "Document")
+]
+
 
 def get_access_token(client_id, client_secret, token_url):
     """Fetch OAuth 2.0 access token from Studytube API"""
@@ -35,7 +47,7 @@ def get_last_checked_time():
     try:
         with open(LAST_CHECKED_FILE, "r") as file:
             last_checked = file.read().strip()
-            return last_checked if last_checked else None
+            return last_checked
     except FileNotFoundError:
         return None  # If file doesn't exist, fetch all available data
 
@@ -44,6 +56,7 @@ def update_last_checked_time():
     """Update the last successful data fetch timestamp"""
     current_time = datetime.now(timezone.utc).isoformat(
     )  # Format: YYYY-MM-DDTHH:MM:SS.sssZ
+
     with open(LAST_CHECKED_FILE, "w") as file:
         file.write(current_time)
 
@@ -91,84 +104,69 @@ def convert_seconds_to_hours_rounded(seconds):
     return math.ceil(hours * 4) / 4  # Round to nearest 0.25
 
 
-def fetch(client_id, client_secret, token_url, users_courses_url):
-    """Fetch completed trainings from Studytube and convert them into Solaforce format."""
-    access_token = get_access_token(client_id, client_secret, token_url)
-    if not access_token:
-        logging.error("ERROR: Access token missing.")
-        return
-
-    # Fetch last timestamp to get only new updates
+def fetch_studytube_items(access_token, users_courses_url):
+    """Fetch items of a given training type from the API"""
     updated_after = get_last_checked_time()
-
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
-
-    params = {
-        "updated_after": updated_after,  # Fetch only new or updated records
-        "completed": True  # Only fetch completed trainings
-    }
+    headers = {"Authorization": f"Bearer {access_token}"}
+    params = {"updated_after": updated_after, "completed": True}
 
     try:
         response = requests.get(
             users_courses_url, headers=headers, params=params)
         response.raise_for_status()
-        all_courses = response.json()
-
-        if not all_courses:
-            logging.info("No new completed trainings retrieved from API.")
-            return
-
-        completed_trainings = []
-
-        for record in all_courses:
-            user = record.get("user", {})
-            course = record.get("course", {})
-            learning_status = record.get("learning_status", "").lower()
-
-            if learning_status == "completed":  # Fetch only completed trainings
-                # Calculate time spent if missing
-                time_spent_seconds = record.get("time_spent", 0)
-                if time_spent_seconds == 0:
-                    time_spent_seconds = calculate_time_spent(
-                        record.get("start_date"), record.get("finish_date"))
-
-                training_data = {
-                    "employeeNumber": user.get("employee_number", "Unknown ID"),
-                    "rainingCategory": "INTERNAL",  # Default value, can be modified later
-                    "trainingTypeStr": course.get("name", "Unknown Course"),
-                    "trainingProvider": "Halton Academy (ST)",
-                    "startDate": format_date(record.get("start_date")),
-                    "endDate": format_date(record.get("finish_date")),
-                    "trainingHours": convert_seconds_to_hours_rounded(time_spent_seconds),
-                    "expirationDate": record.get("deadline_at"),
-                }
-
-                completed_trainings.append(training_data)
-
-        if not completed_trainings:
-            logging.info("No new completed trainings found.")
-            return
-
-        # Convert to DataFrame
-        df_completed_trainings = pd.DataFrame(completed_trainings)
-
-        # Save CSV
-        csv_filename = "completed_trainings.csv"
-        df_completed_trainings.to_csv(
-            csv_filename, index=False, encoding="utf-8-sig")
-
-        # Save Excel
-        excel_filename = "completed_trainings.xlsx"
-        df_completed_trainings.to_excel(excel_filename, index=False)
-
-        logging.info(
-            f"Completed trainings data saved to:\n - {csv_filename}\n - {excel_filename}")
-
-        # Update last checked timestamp to avoid duplicate fetches
-        update_last_checked_time()
-
+        return response.json()
     except requests.exceptions.RequestException as err:
-        logging.error(f"ERROR: Failed to fetch course data - {err}")
+        logging.error(f"ERROR fetching {users_courses_url}: {err}")
+        return []
+
+
+def build_training_record(user, item, item_type, wrapper):
+    """Convert API training record"""
+    start_date = item.get("start_date")
+    finish_date = item.get("finish_date")
+    seconds = calculate_time_spent(start_date, finish_date)
+
+    try:
+        return {
+            "employeeNumber": user.get("employee_number", "Unknown"),
+            "trainingCategory": DEFAULT_CATEGORY,
+            "trainingTitle": item.get(wrapper, {}).get("title") or item.get("course", {}).get("name", "Unknown"),
+            "trainingTypeStr": item_type,
+            "trainingProvider": DEFAULT_PROVIDER,
+            "startDate": format_date(start_date),
+            "endDate": format_date(finish_date),
+            "trainingHours": convert_seconds_to_hours_rounded(seconds),
+            "expirationDate": item.get("deadline_at"),
+        }
+    except Exception as e:
+        logging.error(f"Skipped record due to error: {e}")
+        return None
+
+
+def fetch(client_id, client_secret, token_url, users_courses_url):
+    access_token = get_access_token(client_id, client_secret, token_url)
+    if not access_token:
+        return
+
+    completed_trainings = []
+
+    # Loop through all training types and collect completed trainings
+    for endpoint, wrapper, training_type in TRAINING_TYPES:
+        data = fetch_studytube_items(access_token, users_courses_url)
+        for item in data:
+            if item.get("learning_status") == "completed":
+                record = build_training_record(
+                    item.get("user", {}), item, training_type, wrapper)
+                if record:
+                    completed_trainings.append(record)
+
+    # Export results if any trainings found
+    if completed_trainings:
+        df = pd.DataFrame(completed_trainings)
+        df.to_csv("completed_trainings_all.csv",
+                  index=False, encoding="utf-8-sig")
+        df.to_excel("completed_trainings_all.xlsx", index=False)
+        print("Trainings exported successfully.")
+        update_last_checked_time()
+    else:
+        print("No completed trainings to export.")
