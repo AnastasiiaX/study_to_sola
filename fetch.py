@@ -5,19 +5,30 @@
 # Stores the last successful fetch timestamp in last_checked_timestamp.txt to prevent duplicate processing.
 
 import requests
-import logging
+import json
 import re
 import math
 import pandas as pd
 from datetime import datetime, timezone
+from dateutil import parser
+import logging
 
+# Timestamp file
 LAST_CHECKED_FILE = "last_checked_timestamp.txt"
 
 # Default values
-DEFAULT_PROVIDER = "Halton Academy (ST)"
-DEFAULT_CATEGORY = "INTERNAL"
+DEFAULT_PROVIDER = "Halton Academy(ST)"
+DEFAULT_CATEGORY = "Internal"
 
-# Training types with their API endpoints, data wrapper, and training type label
+# Studytube -> Solaforce training type mapping
+TRAINING_TYPE_MAPPING = {
+    "course": "Online Class",
+    "blog_article": "Material",
+    "video": "Video",
+    "document": "Material"
+}
+
+# Studytube content types
 TRAINING_TYPES = [
     ("users/courses", "course", "Online Course"),
     ("users/blog-articles", "blog_article", "Blog"),
@@ -68,36 +79,24 @@ def format_date(date_str):
 
     # Remove timezone (e.g., +02:00)
     date_str = re.sub(r"\+\d{2}:\d{2}$", "", date_str)
-    # Remove milliseconds (.000)
     date_str = re.sub(r"\.\d{3}", "", date_str)
-
     try:
         parsed_date = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
         return parsed_date.strftime("%Y-%m-%d")
     except ValueError:
-        logging.warning(f"WARNING: Date conversion failed ({date_str})")
         return None
 
 
 def calculate_time_spent(start_date, finish_date):
-    """Calculate time spent in seconds based on start and finish times"""
-    if not start_date or not finish_date:
-        return 0  # Return 0 if any date is missing
-
     try:
-        start_dt = datetime.strptime(start_date, "%Y-%m-%dT%H:%M:%S.%f%z")
-        finish_dt = datetime.strptime(finish_date, "%Y-%m-%dT%H:%M:%S.%f%z")
-
-        time_spent_seconds = (finish_dt - start_dt).total_seconds()
-        return time_spent_seconds
-    except ValueError:
-        logging.warning(
-            f"WARNING: Time calculation failed for start: {start_date}, finish: {finish_date}")
+        start = parser.isoparse(start_date)
+        end = parser.isoparse(finish_date)
+        return (end - start).total_seconds()
+    except (ValueError, TypeError):
         return 0
 
 
 def convert_seconds_to_hours_rounded(seconds):
-    """Convert seconds to hours and round to the nearest 0.25."""
     if not seconds or seconds <= 0:
         return 0.0  # Default to 0 if no time spent
     hours = seconds / 3600  # Convert seconds to hours
@@ -120,24 +119,27 @@ def fetch_studytube_items(access_token, users_courses_url):
         return []
 
 
-def build_training_record(user, item, item_type, wrapper):
-    """Convert API training record"""
+def convert_training_type(study_tube_type):
+    """Muuntaa Studytuben kurssityypin Solaforcen formaattiin."""
+    return TRAINING_TYPE_MAPPING.get(study_tube_type, "Unknown")
+
+
+def build_training_record(user, item, studytube_type, wrapper):
     start_date = item.get("start_date")
     finish_date = item.get("finish_date")
     seconds = calculate_time_spent(start_date, finish_date)
+
+    # Muunnetaan Studytuben tyyppi Solaforcen tyyppiin
+    solaforce_type = convert_training_type(studytube_type)
 
     try:
         return {
             "employeeNumber": user.get("employee_number", "Unknown"),
             "trainingCategory": DEFAULT_CATEGORY,
-            "trainingTitle": item.get(wrapper, {}).get("title") or item.get("course", {}).get("name", "Unknown"),
-            "trainingTypeStr": item_type,
+            "trainingTypeStr": item.get(wrapper, {}).get("title") or item.get("course", {}).get("name", "Unknown"),
             "trainingProvider": DEFAULT_PROVIDER,
-            "startDate": format_date(start_date),
-            "endDate": format_date(finish_date),
-            "trainingHours": convert_seconds_to_hours_rounded(seconds),
-            "expirationDate": item.get("deadline_at"),
         }
+
     except Exception as e:
         logging.error(f"Skipped record due to error: {e}")
         return None
@@ -146,27 +148,31 @@ def build_training_record(user, item, item_type, wrapper):
 def fetch(client_id, client_secret, token_url, users_courses_url):
     access_token = get_access_token(client_id, client_secret, token_url)
     if not access_token:
-        return
+        return []
 
     completed_trainings = []
 
     # Loop through all training types and collect completed trainings
-    for endpoint, wrapper, training_type in TRAINING_TYPES:
+    for endpoint, wrapper, studytube_type in TRAINING_TYPES:
         data = fetch_studytube_items(access_token, users_courses_url)
         for item in data:
             if item.get("learning_status") == "completed":
                 record = build_training_record(
-                    item.get("user", {}), item, training_type, wrapper)
+                    item.get("user", {}), item, studytube_type, wrapper)
                 if record:
                     completed_trainings.append(record)
 
     # Export results if any trainings found
     if completed_trainings:
-        df = pd.DataFrame(completed_trainings)
-        df.to_csv("completed_trainings_all.csv",
-                  index=False, encoding="utf-8-sig")
-        df.to_excel("completed_trainings_all.xlsx", index=False)
-        print("Trainings exported successfully.")
+        # df = pd.DataFrame(completed_trainings)
+        # df.to_csv("completed_trainings_all.csv",
+        #           index=False, encoding="utf-8-sig")
+        # df.to_excel("completed_trainings_all.xlsx", index=False)
+        # print("Trainings exported successfully.")
         update_last_checked_time()
+        print("Final JSON to POST:\n", json.dumps(
+            completed_trainings, ensure_ascii=False, indent=2))
+        return completed_trainings
     else:
         print("No completed trainings to export.")
+        return []
