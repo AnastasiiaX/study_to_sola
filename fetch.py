@@ -5,10 +5,11 @@
 # Stores the last successful fetch timestamp in last_checked_timestamp.txt to prevent duplicate processing.
 
 import requests
+import os
 import json
-import re
 import math
-import pandas as pd
+import re
+
 from datetime import datetime, timezone
 from dateutil import parser
 import logging
@@ -25,16 +26,18 @@ TRAINING_TYPE_MAPPING = {
     "course": "Online Class",
     "blog_article": "Material",
     "video": "Video",
-    "document": "Material"
+    "document": "Curriculum"
 }
 
 # Studytube content types
 TRAINING_TYPES = [
-    ("users/courses", "course", "Online Course"),
-    ("users/blog-articles", "blog_article", "Blog"),
-    ("users/videos", "video", "Video"),
-    ("users/documents", "document", "Document")
+    ("users/courses", "course", "course"),
+    ("users/blog-articles", "blog_article", "blog_article"),
+    ("users/videos", "video", "video"),
+    ("users/documents", "document", "document")
 ]
+
+# --- Helper Functions ---
 
 
 def get_access_token(client_id, client_secret, token_url):
@@ -54,30 +57,23 @@ def get_access_token(client_id, client_secret, token_url):
 
 
 def get_last_checked_time():
-    """Retrieve the last timestamp when data was successfully fetched"""
     try:
         with open(LAST_CHECKED_FILE, "r") as file:
-            last_checked = file.read().strip()
-            return last_checked
+            return file.read().strip()
     except FileNotFoundError:
-        return None  # If file doesn't exist, fetch all available data
+        return None
 
 
 def update_last_checked_time():
     """Update the last successful data fetch timestamp"""
-    current_time = datetime.now(timezone.utc).isoformat(
-    )  # Format: YYYY-MM-DDTHH:MM:SS.sssZ
-
     with open(LAST_CHECKED_FILE, "w") as file:
-        file.write(current_time)
+        file.write(datetime.now(timezone.utc).isoformat())
 
 
 def format_date(date_str):
     """Convert date format to YYYY-MM-DD and remove timezone/milliseconds"""
     if not date_str or not isinstance(date_str, str):
-        return None  # Return None if value is missing or not a string
-
-    # Remove timezone (e.g., +02:00)
+        return None
     date_str = re.sub(r"\+\d{2}:\d{2}$", "", date_str)
     date_str = re.sub(r"\.\d{3}", "", date_str)
     try:
@@ -98,9 +94,8 @@ def calculate_time_spent(start_date, finish_date):
 
 def convert_seconds_to_hours_rounded(seconds):
     if not seconds or seconds <= 0:
-        return 0.0  # Default to 0 if no time spent
-    hours = seconds / 3600  # Convert seconds to hours
-    return math.ceil(hours * 4) / 4  # Round to nearest 0.25
+        return "0.25"
+    return str(round((seconds / 3600) * 4) / 4)
 
 
 def fetch_studytube_items(access_token, users_courses_url):
@@ -119,27 +114,28 @@ def fetch_studytube_items(access_token, users_courses_url):
         return []
 
 
-def convert_training_type(study_tube_type):
-    """Muuntaa Studytuben kurssityypin Solaforcen formaattiin."""
-    return TRAINING_TYPE_MAPPING.get(study_tube_type, "Unknown")
+def convert_training_type(studytube_type):
+    return TRAINING_TYPE_MAPPING.get(studytube_type, "Unknown")
 
 
 def build_training_record(user, item, studytube_type, wrapper):
     start_date = item.get("start_date")
     finish_date = item.get("finish_date")
     seconds = calculate_time_spent(start_date, finish_date)
-
-    # Muunnetaan Studytuben tyyppi Solaforcen tyyppiin
-    solaforce_type = convert_training_type(studytube_type)
+    training_type = convert_training_type(studytube_type)
 
     try:
         return {
             "employeeNumber": user.get("employee_number", "Unknown"),
             "trainingCategory": DEFAULT_CATEGORY,
             "trainingTypeStr": item.get(wrapper, {}).get("title") or item.get("course", {}).get("name", "Unknown"),
+            "trainingType": training_type,
             "trainingProvider": DEFAULT_PROVIDER,
+            "startDate": format_date(start_date),
+            "endDate": format_date(finish_date),
+            "trainingHours": str(convert_seconds_to_hours_rounded(seconds)),
+            "expirationDate": item.get("deadline_at")
         }
-
     except Exception as e:
         logging.error(f"Skipped record due to error: {e}")
         return None
@@ -162,17 +158,9 @@ def fetch(client_id, client_secret, token_url, users_courses_url):
                 if record:
                     completed_trainings.append(record)
 
-    # Export results if any trainings found
     if completed_trainings:
-        # df = pd.DataFrame(completed_trainings)
-        # df.to_csv("completed_trainings_all.csv",
-        #           index=False, encoding="utf-8-sig")
-        # df.to_excel("completed_trainings_all.xlsx", index=False)
-        # print("Trainings exported successfully.")
         update_last_checked_time()
-        print("Final JSON to POST:\n", json.dumps(
-            completed_trainings, ensure_ascii=False, indent=2))
-        return completed_trainings
+        return {"trainings": completed_trainings}
     else:
-        print("No completed trainings to export.")
-        return []
+        print("No new trainings to export.")
+        return {}

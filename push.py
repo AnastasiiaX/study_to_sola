@@ -1,24 +1,22 @@
 import requests
 import logging
+import json
 
 
 def push(user_id, user_key, api_url, completed_trainings):
-
     if completed_trainings:
-        headers = {
-            "Authorization": f"SOLAFORCE-HMAC-SHA256 User={user_id},Key={user_key}",
-            "Content-Type": "application/json"
-        }
-
         try:
-            Postresponse = requests.post(
-                api_url, headers=headers, json={"trainings": completed_trainings})
+            headers = {
+                "Authorization": f"SOLAFORCE-HMAC-SHA256 User={user_id},Key={user_key}",
+                "Content-Type": "application/json"
+            }
 
-            # Jos 200, menee läpi, jos 401, ei pääsyä
-            print("Status code:", Postresponse.status_code)
-            print("Response:", Postresponse.text)
+            post_response = requests.post(
+                api_url, headers=headers, json=json.dumps(completed_trainings))
+
+            logging.info(f"Status code: {post_response.status_code}")
+            logging.info(f"Response: {post_response.text}")
         except requests.exceptions.RequestException as err:
-            logging.error(f"Failed to post to Solaforce: {err}")
-            print(f"Error posting to Solaforce: {err}")
+            logging.error(f"Error pushing trainings: {err}")
     else:
-        print("Ei dataa lähetettäväksi.")
+        print("No data to send.")
