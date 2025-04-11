@@ -9,13 +9,11 @@ import os
 import json
 import math
 import re
-
 from datetime import datetime, timezone
 from dateutil import parser
 import logging
 
-# Timestamp file
-LAST_CHECKED_FILE = "last_checked_timestamp.txt"
+logging.getLogger('azure').setLevel(logging.WARNING)
 
 # Default values
 DEFAULT_PROVIDER = "Halton Academy(ST)"
@@ -56,20 +54,6 @@ def get_access_token(client_id, client_secret, token_url):
         return None
 
 
-def get_last_checked_time():
-    try:
-        with open(LAST_CHECKED_FILE, "r") as file:
-            return file.read().strip()
-    except FileNotFoundError:
-        return None
-
-
-def update_last_checked_time():
-    """Update the last successful data fetch timestamp"""
-    with open(LAST_CHECKED_FILE, "w") as file:
-        file.write(datetime.now(timezone.utc).isoformat())
-
-
 def format_date(date_str):
     """Convert date format to YYYY-MM-DD and remove timezone/milliseconds"""
     if not date_str or not isinstance(date_str, str):
@@ -98,11 +82,10 @@ def convert_seconds_to_hours_rounded(seconds):
     return str(round((seconds / 3600) * 4) / 4)
 
 
-def fetch_studytube_items(access_token, users_courses_url):
+def fetch_studytube_items(access_token, users_courses_url, last_checked_timestamp):
     """Fetch items of a given training type from the API"""
-    updated_after = get_last_checked_time()
     headers = {"Authorization": f"Bearer {access_token}"}
-    params = {"updated_after": updated_after, "completed": True}
+    params = {"updated_after": last_checked_timestamp, "completed": True}
 
     try:
         response = requests.get(
@@ -141,16 +124,21 @@ def build_training_record(user, item, studytube_type, wrapper):
         return None
 
 
-def fetch(client_id, client_secret, token_url, users_courses_url):
+def fetch(client_id, client_secret, token_url, users_courses_url, blob_client):
     access_token = get_access_token(client_id, client_secret, token_url)
     if not access_token:
         return []
 
     completed_trainings = []
 
+    last_checked_timestamp = blob_client.download_blob().readall().decode(
+        'utf-8') if blob_client.exists() and blob_client.download_blob().readall().decode(
+        'utf-8') != "" else None
+
     # Loop through all training types and collect completed trainings
     for endpoint, wrapper, studytube_type in TRAINING_TYPES:
-        data = fetch_studytube_items(access_token, users_courses_url)
+        data = fetch_studytube_items(
+            access_token, users_courses_url, last_checked_timestamp)
         for item in data:
             if item.get("learning_status") == "completed":
                 record = build_training_record(
@@ -159,7 +147,8 @@ def fetch(client_id, client_secret, token_url, users_courses_url):
                     completed_trainings.append(record)
 
     if completed_trainings:
-        update_last_checked_time()
+        blob_client.upload_blob(
+            datetime.now(timezone.utc).isoformat(), overwrite=True)
         return {"trainings": completed_trainings}
     else:
         print("No new trainings to export.")
