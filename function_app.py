@@ -26,7 +26,7 @@ app = func.FunctionApp()
 
 
 @app.function_name(name="studyToSola")
-@app.timer_trigger(schedule="0 0 * * *", arg_name="studyToSola", run_on_startup=False, use_monitor=False)
+@app.timer_trigger(schedule="*/30 * * * * *", arg_name="studyToSola", run_on_startup=False, use_monitor=False)
 def timer_trigger(studyToSola: func.TimerRequest) -> None:
     blob_service_client = BlobServiceClient.from_connection_string(
         STORAGE_ACC_CONN_STRING)

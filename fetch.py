@@ -111,8 +111,8 @@ def build_training_record(user, item, studytube_type, wrapper):
             "trainingProvider": DEFAULT_PROVIDER,
             "startDate": format_date(start_date),
             "endDate": format_date(finish_date),
-            "trainingHours": str(convert_seconds_to_hours_rounded(seconds)),
-            "trainingClass": training_type
+            # "trainingClass": training_type,
+            "trainingHours": str(convert_seconds_to_hours_rounded(seconds))
         }
     except Exception as e:
         logging.error(f"Skipped record due to error: {e}")
