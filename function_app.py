@@ -1,5 +1,5 @@
-import logging
 import azure.functions as func
+from azure.storage.blob import BlobServiceClient
 import os
 from dotenv import load_dotenv
 from fetch import fetch
@@ -18,14 +18,29 @@ SOLAFORCE_USER_ID = os.getenv("SOLAFORCE_USER_ID")
 SOLAFORCE_USER_KEY = os.getenv("SOLAFORCE_USER_KEY")
 SOLAFORCE_API_URL = os.getenv("SOLAFORCE_API_URL")
 
+STORAGE_ACC_CONN_STRING = os.getenv("STORAGE_ACC_CONN_STRING")
+STORAGE_ACC_CONT_NAME = os.getenv("STORAGE_ACC_CONT_NAME")
+STORAGE_ACC_BLOB_NAME = os.getenv("STORAGE_ACC_BLOB_NAME")
+
 app = func.FunctionApp()
 
 
 @app.function_name(name="studyToSola")
-@app.timer_trigger(schedule="0 0 0 29 2 *", arg_name="studyToSola", run_on_startup=True, use_monitor=False)
+@app.timer_trigger(schedule="0 0 * * *", arg_name="studyToSola", run_on_startup=False, use_monitor=False)
 def timer_trigger(studyToSola: func.TimerRequest) -> None:
+    blob_service_client = BlobServiceClient.from_connection_string(
+        STORAGE_ACC_CONN_STRING)
+
+    container_client = blob_service_client.get_container_client(
+        STORAGE_ACC_CONT_NAME)
+
+    if not container_client.exists():
+        container_client.create_container()
+
+    blob_client = container_client.get_blob_client("last_checked.txt")
+
     completed_trainings = fetch(STUDYTUBE_CLIENT_ID, STUDYTUBE_CLIENT_SECRET,
-                                STUDYTUBE_TOKEN_URL, STUDYTUBE_USERS_COURSES_URL)
+                                STUDYTUBE_TOKEN_URL, STUDYTUBE_USERS_COURSES_URL, blob_client)
 
     push(SOLAFORCE_USER_ID, SOLAFORCE_USER_KEY,
-         SOLAFORCE_API_URL, completed_trainings)
+         SOLAFORCE_API_URL, completed_trainings, blob_client)
