@@ -1,6 +1,5 @@
 import requests
 import logging
-import json
 from datetime import datetime, timezone
 
 
