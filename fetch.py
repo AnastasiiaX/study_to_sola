@@ -5,11 +5,8 @@
 # Stores the last successful fetch timestamp in last_checked_timestamp.txt to prevent duplicate processing.
 
 import requests
-import os
-import json
-import math
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from dateutil import parser
 import logging
 
@@ -19,23 +16,23 @@ logging.getLogger('azure').setLevel(logging.WARNING)
 DEFAULT_PROVIDER = "Halton Academy(ST)"
 DEFAULT_CATEGORY = "Internal"
 
-# Studytube -> Solaforce training type mapping
+# Mapping Studytube types to Solaforce types
 TRAINING_TYPE_MAPPING = {
-    "course": "Online Class",
-    "blog_article": "Material",
+    "course": "Online course",
+    "blog_article": "Article",
     "video": "Video",
-    "document": "Curriculum"
+    "document": "Document",
+    "event": "Event"
 }
 
-# Studytube content types
+# Studytube endpoints
 TRAINING_TYPES = [
     ("users/courses", "course", "course"),
     ("users/blog-articles", "blog_article", "blog_article"),
     ("users/videos", "video", "video"),
-    ("users/documents", "document", "document")
+    ("users/documents", "document", "document"),
+    ("users/event-participants", "event", "event")
 ]
-
-# --- Helper Functions ---
 
 
 def get_access_token(client_id, client_secret, token_url):
@@ -77,9 +74,8 @@ def calculate_time_spent(start_date, finish_date):
 
 
 def convert_seconds_to_hours_rounded(seconds):
-    if not seconds or seconds <= 0:
-        return "0.25"
-    return str(round((seconds / 3600) * 4) / 4)
+    hours = max(seconds / 3600, 0.25)
+    return str(round(hours * 4) / 4)
 
 
 def fetch_studytube_items(access_token, users_courses_url, last_checked_timestamp):
@@ -112,12 +108,11 @@ def build_training_record(user, item, studytube_type, wrapper):
             "employeeNumber": user.get("employee_number", "Unknown"),
             "trainingCategory": DEFAULT_CATEGORY,
             "trainingTypeStr": item.get(wrapper, {}).get("title") or item.get("course", {}).get("name", "Unknown"),
-            "trainingType": training_type,
             "trainingProvider": DEFAULT_PROVIDER,
             "startDate": format_date(start_date),
             "endDate": format_date(finish_date),
             "trainingHours": str(convert_seconds_to_hours_rounded(seconds)),
-            "expirationDate": item.get("deadline_at")
+            "trainingClass": training_type
         }
     except Exception as e:
         logging.error(f"Skipped record due to error: {e}")
@@ -132,8 +127,8 @@ def fetch(client_id, client_secret, token_url, users_courses_url, blob_client):
     completed_trainings = []
 
     last_checked_timestamp = blob_client.download_blob().readall().decode(
-        'utf-8') if blob_client.exists() and blob_client.download_blob().readall().decode(
-        'utf-8') != "" else None
+        'utf-8') if (blob_client.exists() and blob_client.download_blob().readall().decode(
+            'utf-8') != "") else None
 
     # Loop through all training types and collect completed trainings
     for endpoint, wrapper, studytube_type in TRAINING_TYPES:
@@ -147,9 +142,7 @@ def fetch(client_id, client_secret, token_url, users_courses_url, blob_client):
                     completed_trainings.append(record)
 
     if completed_trainings:
-        blob_client.upload_blob(
-            datetime.now(timezone.utc).isoformat(), overwrite=True)
         return {"trainings": completed_trainings}
     else:
-        print("No new trainings to export.")
+        logging.info("No new trainings to export.")
         return {}

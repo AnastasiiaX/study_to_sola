@@ -26,7 +26,7 @@ app = func.FunctionApp()
 
 
 @app.function_name(name="studyToSola")
-@app.timer_trigger(schedule="*/30 * * * * *", arg_name="studyToSola", run_on_startup=False, use_monitor=False)
+@app.timer_trigger(schedule="0 0 * * *", arg_name="studyToSola", run_on_startup=False, use_monitor=False)
 def timer_trigger(studyToSola: func.TimerRequest) -> None:
     blob_service_client = BlobServiceClient.from_connection_string(
         STORAGE_ACC_CONN_STRING)
@@ -43,4 +43,4 @@ def timer_trigger(studyToSola: func.TimerRequest) -> None:
                                 STUDYTUBE_TOKEN_URL, STUDYTUBE_USERS_COURSES_URL, blob_client)
 
     push(SOLAFORCE_USER_ID, SOLAFORCE_USER_KEY,
-         SOLAFORCE_API_URL, completed_trainings)
+         SOLAFORCE_API_URL, completed_trainings, blob_client)
