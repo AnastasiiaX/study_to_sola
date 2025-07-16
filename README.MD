@@ -2,7 +2,7 @@
 
 ## Project description
 
-Halton uses two systems: StudyTube, a learning platform, and SolaForce, an HR system for tracking training records. Manual data transfer between these systems has led to delays, inefficiencies, and a higher risk of errors in HR records, which in turn increases administrative workload and can affect timely decision‑making.
+Some_company uses two systems: StudyTube, a learning platform, and SolaForce, an HR system for tracking training records. Manual data transfer between these systems has led to delays, inefficiencies, and a higher risk of errors in HR records, which in turn increases administrative workload and can affect timely decision‑making.
 
 To address these issues, the Metropolia team has developed an automated data‑transfer solution that synchronizes StudyTube and SolaForce, eliminates the need for manual updates, improves efficiency, and reduces errors.
 
