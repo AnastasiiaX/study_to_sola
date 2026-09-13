@@ -4,10 +4,6 @@ An Azure Functions integration that syncs completed training records nightly fro
 StudyTube, a learning platform, into SolaForce, an HR system — replacing a manual
 copying step that was causing delays and errors in HR records.
 
-`TODO(owner): how often did someone do this by hand, and how long did it take?
-Put the answer in the sentence above — "replacing a manual step that took X hours
-every Y" is the line a hiring manager remembers.`
-
 ## How it works
 
 ```mermaid
@@ -95,39 +91,37 @@ export. No data to send."; otherwise it logs how many records were uploaded.
 Failures to retrieve a token or reach either API are logged as errors, and a
 single malformed record is logged and skipped rather than failing the whole run.
 
-## Testing
+## Testing and failure handling
 
-Tested in the test environments of both systems. Verified:
+Tested in the test environments of both systems. No automated test suite is
+committed.
+
+The integration is built to fail safely, and the behaviour below is what the code
+implements:
 
 - **Checkpointing** — the stored timestamp advances only after a successful
-  upload, and a run with no new records still advances it without posting.
-- **Incremental fetch** — re-running immediately after a successful run picks up
-  no duplicates.
+  upload; a run with no new records advances it without posting.
+- **Incremental fetch** — each run requests only records completed after the
+  stored timestamp, so a repeated run sends no duplicates.
 - **Error paths** — failed OAuth token retrieval, failed StudyTube fetch and
   failed SolaForce upload are each caught and logged, leaving the timestamp
   unchanged so the next run retries the same window.
-- **Malformed records** — a record that fails transformation is skipped and
-  logged without aborting the batch.
-
-`TODO(owner): confirm this list matches what the team actually exercised, and
-remove anything that was not tested. No automated test suite is committed.`
+- **Malformed records** — a record that fails transformation is logged and
+  skipped without aborting the batch.
 
 ## Limitations / notes
 
 - Maximum allowed length for `trainingTypeStr` is 63 characters in SolaForce.
 - No automated tests are committed; verification was manual against both test
   environments.
-- `TODO(owner): the timer is configured as "0 0 * * *" and the schedule is
-  described as midnight Finnish time. Azure evaluates NCRONTAB in UTC unless
-  WEBSITE_TIME_ZONE is set on the Function App. Confirm which applies in the
-  deployed environment and correct this line either way.`
+- The timer trigger is configured as `"0 0 * * *"`. Azure evaluates NCRONTAB in
+  UTC unless `WEBSITE_TIME_ZONE` is set on the Function App, so the wall-clock
+  fire time depends on that app setting.
 
 ## Client
 
 Built for a Finnish client company as a Metropolia University of Applied Sciences
 project.
-`TODO(owner): confirm with Halton whether the client can be named publicly. If
-yes, replace "a Finnish client company" with Halton Oy throughout.`
 
 ## Development
 
@@ -139,5 +133,3 @@ Work was done on feature branches and merged to `main` through pull requests —
 Metropolia project team. Anastasiia Kosareva ([@AnastasiiaX](https://github.com/AnastasiiaX))
 authored 9 of the 11 merged pull requests; [@Elfutbalgoat](https://github.com/Elfutbalgoat)
 authored the other two.
-`TODO(owner): add your teammate's real name if they are happy to be credited, and
-a one-line split of who owned which part of the integration.`
