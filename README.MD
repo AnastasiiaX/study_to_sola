@@ -1,62 +1,73 @@
 # Automated Training Data Transfer Between StudyTube and SolaForce
 
-## Project description
+An Azure Functions integration that syncs completed training records nightly from
+StudyTube, a learning platform, into SolaForce, an HR system — replacing a manual
+copying step that was causing delays and errors in HR records.
 
-Some_company uses two systems: StudyTube, a learning platform, and SolaForce, an HR system for tracking training records. Manual data transfer between these systems has led to delays, inefficiencies, and a higher risk of errors in HR records, which in turn increases administrative workload and can affect timely decision‑making.
+## How it works
 
-To address these issues, the Metropolia team has developed an automated data‑transfer solution that synchronizes StudyTube and SolaForce, eliminates the need for manual updates, improves efficiency, and reduces errors.
+```mermaid
+flowchart LR
+    T["Timer trigger<br/>daily at midnight"] --> F["fetch.py"]
+    B[("Azure Blob Storage<br/>last_checked.txt")] -- "last run timestamp" --> F
+    F -- "GET /users/courses<br/>completed since timestamp" --> S["StudyTube API"]
+    S --> F
+    F -- "transform to<br/>SolaForce schema" --> P["push.py"]
+    P -- "POST /uploadtrainings" --> SF["SolaForce API"]
+    P -- "write new timestamp" --> B
+```
+
+1. A timer trigger fires the function once a day.
+2. `fetch.py` reads the last run's timestamp from a blob, requests an OAuth token,
+   and pulls every course completed since that timestamp from StudyTube.
+3. Records are transformed to match SolaForce's expected schema.
+4. `push.py` uploads them and writes the new timestamp back to blob storage, so
+   the next run picks up exactly where this one stopped.
+
+The timestamp is only advanced after the upload succeeds, so a failed run is
+retried on the next pass rather than silently skipping records.
 
 ## Technologies used
 
--   **Programming language**: Python 3.12
--   **Service**: Azure Functions with Timer trigger
--   **Development**: Azurite (for Azure Storage Account integration local development)
--   **GitHub repository**: https://github.com/AnastasiiaX/study_to_sola (repository is private)
--   **Documentation**: the Metropolia team received documentation from both partners, StudyTube and SolaForce.
+Python 3.12, Azure Functions (timer trigger), Azure Blob Storage, Azurite for
+local development, REST APIs on both ends.
 
-## Installation & Setup
+## Repository layout
 
-1. Clone the repository
-2. Install required packages: `pip install -r requirements.txt`
-3. Set up `local.settings.json` file with necessary environment variables
-4. Run Azurite and start the Azure Function locally with `func start`
+| File | Role |
+|---|---|
+| `function_app.py` | Azure Function definition and timer trigger; wires fetch to push |
+| `fetch.py` | OAuth token retrieval, StudyTube paging, transform to SolaForce schema |
+| `push.py` | Uploads records to SolaForce and advances the stored timestamp |
+| `host.json` | Azure Functions host configuration |
+| `requirements.txt` | Python dependencies |
+| `local.settings.json` | Local environment settings (not committed) |
 
-## Usage
+## Installation & setup
 
-### Main flow of the code
+1. Clone the repository.
+2. Install dependencies: `pip install -r requirements.txt`
+3. Create `local.settings.json` with the environment variables listed below.
+4. Start Azurite, then run the function locally with `func start`.
 
-Azure Timer Function pulls data from StudyTube, processes it and then uploads to Solaforce. The function runs on a timer trigger at midnight in Finland. Then the function saves timecode to Azure Storage Account as a blob, so it will know for the next time since when data should be checked.
+## Environment variables
 
-When the function runs it logs out some info and error messages, if they occur. If during function run it has not found any new study record, it will log: "No new trainings to export. No data to send." The message will differ if the function has found new study records, then it will log a small text line telling how many records were uploaded
-
-### Key Files and Their Roles
-
--   `fetch.py`: File for fetching all completed courses after updated_after timestamp from Studytube and converts results to match Solaforce's requirements.
-
--   `function_app.py`: Azure Function configuration file, defines Timer trigger type.
-
--   `local.settings.json`: Local environment settings
-
--   `push.py`: File for pushing data to SolaForce
-
--   `requirements.txt`: List of all dependencies needed to run the project.
-
-## Environment Variables:
-
-### Azurite variables:
+### Azure Storage (Azurite, local development)
 
 ```
 "STORAGE_ACC_CONN_STRING": "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
 ```
 
-It’s not sensitive or secret information, because it’s only used for development purposes. These values are always the same, when using Azurite.
+This is Azurite's standard public development key, not a credential. It is
+identical on every Azurite install and grants access to nothing but a local
+emulator.
 
 ```
 "STORAGE_ACC_CONT_NAME": Name of the container in Azure Storage Account
 "STORAGE_ACC_BLOB_NAME": Name of the blob in Azure Storage Account
 ```
 
-### StudyTube API access variables:
+### StudyTube API access
 
 ```
 "STUDYTUBE_CLIENT_ID": StudyTube Client Id
@@ -65,46 +76,60 @@ It’s not sensitive or secret information, because it’s only used for develop
 "STUDYTUBE_USERS_COURSES_URL": https://STUDYTUBE_INSTANCE/api/v2/users/courses
 ```
 
-### SolaForce API access variables:
+### SolaForce API access
 
 ```
-"SOLAFORCE_USER_ID": SolaForce User’s Id
-"SOLAFORCE_USER_KEY": SolaForce User’s Key
+"SOLAFORCE_USER_ID": SolaForce User's Id
+"SOLAFORCE_USER_KEY": SolaForce User's Key
 "SOLAFORCE_API_URL": https://SOLAFORCE_INSTACE/d/json/uploadtrainings
 ```
 
-## Testing:
+## Logging
 
-The code was tested solely in the test environments of both systems.
+Each run logs its outcome. With no new records it logs "No new trainings to
+export. No data to send."; otherwise it logs how many records were uploaded.
+Failures to retrieve a token or reach either API are logged as errors, and a
+single malformed record is logged and skipped rather than failing the whole run.
 
-## Limitations / Notes:
+## Testing and failure handling
 
-Maximum allowed length for trainingTypeStr is 63 characters in SolaForce.
+Tested in the test environments of both systems. No automated test suite is
+committed.
 
-## Working / Opening project
+The integration is built to fail safely, and the behaviour below is what the code
+implements:
 
-### VSCode
+- **Checkpointing** — the stored timestamp advances only after a successful
+  upload; a run with no new records advances it without posting.
+- **Incremental fetch** — each run requests only records completed after the
+  stored timestamp, so a repeated run sends no duplicates.
+- **Error paths** — failed OAuth token retrieval, failed StudyTube fetch and
+  failed SolaForce upload are each caught and logged, leaving the timestamp
+  unchanged so the next run retries the same window.
+- **Malformed records** — a record that fails transformation is logged and
+  skipped without aborting the batch.
 
-1. Open VSCode
-2. Select File -> Open Folder and find study_to_sola from your Desktop
+## Limitations / notes
 
-### Terminal
+- Maximum allowed length for `trainingTypeStr` is 63 characters in SolaForce.
+- No automated tests are committed; verification was manual against both test
+  environments.
+- The timer trigger is configured as `"0 0 * * *"`. Azure evaluates NCRONTAB in
+  UTC unless `WEBSITE_TIME_ZONE` is set on the Function App, so the wall-clock
+  fire time depends on that app setting.
 
-1. Open Terminal
-2. type `cd Desktop/study_to_sola`
+## Client
 
-## Starting work (branching out and back to main)
+Built for a Finnish client company as a Metropolia University of Applied Sciences
+project.
 
-### Create your own feature branch
+## Development
 
-0. You should be in Terminal, once you done step from Opening project chapter
-1. Type: `git checkout main` and after that type: `git pull origin main`
-2. Type: `git checkout -b feature/YOUR_BRANCH_NAME` (not in caps lock)
+Work was done on feature branches and merged to `main` through pull requests —
+11 merged, across two contributors.
 
--   Do your programming here
+## Authors
 
-3. Once you have made your change type: `git add .`
-4. Type: `git commit -m "DESCRIBE THE CHANGE YOU MADE HERE"` (not in capse lock)
-5. Type: `git push origin feature/YOUR_BRANCH_NAME` branch name you need to use from the second step
-6. In response from git you will get smth like: "Create Pull Request: https://XXXX". Open this link in browser and go through the process to first create and then merge Pull Request. Don't forget to delete the branch.
-7. Type: `git checkout origin main`
+Metropolia project team. Anastasiia Kosareva ([@AnastasiiaX](https://github.com/AnastasiiaX))
+authored 9 of the 11 merged pull requests; [@Elfutbalgoat](https://github.com/Elfutbalgoat)
+authored the other two.
